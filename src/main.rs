@@ -7,6 +7,9 @@ mod constants;
 mod downloader;
 mod lldb;
 mod adb;
+mod apk;
+mod device;
+mod waydroid;
 
 #[derive(clap::Parser)]
 struct Args {

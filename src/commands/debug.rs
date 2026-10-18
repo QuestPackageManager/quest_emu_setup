@@ -6,20 +6,26 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::Stdio,
     thread,
     time::Duration,
 };
 
-use color_eyre::eyre::Context;
+use color_eyre::eyre::{Context, bail};
 
 use crate::{
-    adb::{self, adb_status, detect_device_arch}, commands::Command, constants::{self, adb_path}, lldb::{self, AttachInfo},
+    adb::AdbDevice,
+    commands::Command,
+    constants,
+    device::DeviceArgs,
+    lldb::{self, AttachInfo},
 };
 
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 #[derive(Debug)]
 pub struct DebugArgs {
+    #[cfg_attr(feature = "clap", command(flatten))]
+    device: DeviceArgs,
+
     #[cfg_attr(feature = "clap", command(subcommand))]
     action: DebugAction,
 }
@@ -34,8 +40,8 @@ pub enum DebugAction {
         /// Android package name of the app to debug, e.g. "com.beatgames.beatsaber"
         package: String,
 
-        /// The architecture of the target device (e.g. "aarch64", "x86_64").
-        /// Auto-detected from the device via `adb` if omitted.
+        /// The architecture the app's native code runs as (e.g. "aarch64", "x86_64").
+        /// Auto-detected from the installed app via `adb` if omitted.
         arch: Option<String>,
     },
 
@@ -47,8 +53,8 @@ pub enum DebugAction {
         /// Android package name of the app to debug, e.g. "com.beatgames.beatsaber"
         package: String,
 
-        /// The architecture of the target device (e.g. "aarch64", "x86_64").
-        /// Auto-detected from the device via `adb` if omitted.
+        /// The architecture the app's native code runs as (e.g. "aarch64", "x86_64").
+        /// Auto-detected from the installed app via `adb` if omitted.
         arch: Option<String>,
 
         /// The port to forward and listen on
@@ -83,9 +89,10 @@ pub enum DebugAction {
 
 impl Command for DebugArgs {
     fn execute(self, _ctx: &super::GlobalContext) -> color_eyre::Result<()> {
+        let device = self.device.resolve_adb()?;
         match self.action {
             DebugAction::Install { package, arch } => {
-                install_lldb_server(&package, arch.as_deref())?;
+                install_lldb_server(&device, &package, arch.as_deref())?;
             }
             DebugAction::Attach {
                 package,
@@ -97,9 +104,10 @@ impl Command for DebugArgs {
                 pid_file,
                 relaunch,
             } => {
-                install_lldb_server(&package, arch.as_deref())?;
-                start_lldb_platform_server(&package, port)?;
+                install_lldb_server(&device, &package, arch.as_deref())?;
+                start_lldb_platform_server(&device, &package, port)?;
                 attach(
+                    &device,
                     &package,
                     port,
                     &code_bin,
@@ -115,10 +123,38 @@ impl Command for DebugArgs {
     }
 }
 
-fn resolve_arch(arch: Option<&str>) -> color_eyre::Result<String> {
-    match arch {
-        Some(arch) => Ok(arch.to_string()),
-        None => detect_device_arch(),
+fn resolve_arch(
+    device: &AdbDevice,
+    package: &str,
+    arch: Option<&str>,
+) -> color_eyre::Result<String> {
+    if let Some(arch) = arch {
+        return Ok(arch.to_string());
+    }
+
+    let arch = device.guest_arch(Some(package))?;
+    if let Some(bridge) = device.native_bridge()? {
+        let host_abi = device.getprop("ro.product.cpu.abi")?;
+        if host_abi != arch {
+            eprintln!(
+                "Note: {package} runs as {arch} through {bridge} on this {host_abi} device. \
+                 Debugging translated code is limited; pass the arch explicitly to override."
+            );
+        }
+    }
+    Ok(arch)
+}
+
+/// `run-as` only works for debuggable apps, so fail early with a clear message
+/// instead of `run-as`'s raw error.
+fn ensure_debuggable(device: &AdbDevice, package: &str) -> color_eyre::Result<()> {
+    match device.is_debuggable(package)? {
+        Some(true) => Ok(()),
+        Some(false) => bail!(
+            "{package} is not debuggable, so lldb-server can't be installed into it via `run-as`. \
+             `debug` needs a build with android:debuggable=\"true\" in its manifest"
+        ),
+        None => bail!("{package} is not installed on {}", device.describe()),
     }
 }
 
@@ -131,41 +167,23 @@ const APP_LLDB_SERVER_PATH: &str = "./lldb-server";
 /// 3. `run-as` `cp` it into `package`'s private storage, since lldb-server has to
 ///    run under the app's own SELinux/UID context to be allowed to attach to it.
 /// 4. `chmod` it executable again (the copy doesn't preserve permissions).
-fn install_lldb_server(package: &str, arch: Option<&str>) -> color_eyre::Result<()> {
-    let arch = resolve_arch(arch)?;
+fn install_lldb_server(
+    device: &AdbDevice,
+    package: &str,
+    arch: Option<&str>,
+) -> color_eyre::Result<()> {
+    ensure_debuggable(device, package)?;
+    let arch = resolve_arch(device, package, arch)?;
     let lldb_server_path = constants::lldb_server_path(&arch);
     let device_tmp_path = "/data/local/tmp/lldb-server";
 
     println!("Pushing lldb-server ({arch}) to device...");
-    adb_status(&["push", &lldb_server_path.display().to_string(), device_tmp_path])
-        .context("Failed to push lldb-server to device")?;
-    adb_status(&["shell", "chmod", "755", device_tmp_path])
-        .context("Failed to chmod lldb-server on device")?;
+    device.push(&lldb_server_path.display().to_string(), device_tmp_path)?;
+    device.chmod("755", device_tmp_path)?;
 
     println!("Copying lldb-server into {package}'s private storage...");
-    adb_status(&[
-        "shell",
-        "run-as",
-        package,
-        "cp",
-        device_tmp_path,
-        APP_LLDB_SERVER_PATH,
-    ])
-    .with_context(|| {
-        format!(
-            "Failed to copy lldb-server into {package}'s storage \
-             (is the app installed and debuggable?)"
-        )
-    })?;
-    adb_status(&[
-        "shell",
-        "run-as",
-        package,
-        "chmod",
-        "755",
-        APP_LLDB_SERVER_PATH,
-    ])
-    .context("Failed to chmod lldb-server in app storage")?;
+    device.run_as(package, &["cp", device_tmp_path, APP_LLDB_SERVER_PATH])?;
+    device.run_as(package, &["chmod", "755", APP_LLDB_SERVER_PATH])?;
 
     println!("lldb-server installed in {package}'s private storage.");
     Ok(())
@@ -175,27 +193,21 @@ fn install_lldb_server(package: &str, arch: Option<&str>) -> color_eyre::Result<
 /// Forwards `port` and launches the lldb-server already installed (see
 /// `install_lldb_server`) in `package`'s private storage as a platform server,
 /// in the background, so it's still listening after this function returns.
-fn start_lldb_platform_server(package: &str, port: u16) -> color_eyre::Result<()> {
+fn start_lldb_platform_server(device: &AdbDevice, package: &str, port: u16) -> color_eyre::Result<()> {
     println!("Forwarding port {port}");
-    adb_status(&["forward", &format!("tcp:{port}"), &format!("tcp:{port}")])
-        .context("Failed to forward debug port")?;
+    device.forward_tcp(port, port)?;
 
     println!("Starting lldb-server platform server on the device...");
-    std::process::Command::new(adb_path())
-        .args([
-            "shell",
-            "run-as",
-            package,
+    device.spawn_run_as(
+        package,
+        &[
             APP_LLDB_SERVER_PATH,
             "platform",
             "--listen",
             &format!("*:{port}"),
             "--server",
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("Failed to start lldb-server")?;
+        ],
+    )?;
 
     // Give it a moment to start listening before callers try to connect.
     thread::sleep(Duration::from_millis(500));
@@ -213,6 +225,7 @@ fn start_lldb_platform_server(package: &str, port: u16) -> color_eyre::Result<()
 ///    `wait_for_pid`/`build_attach_info`).
 /// 3. Print it, and open it with `code --open-url` if requested.
 fn attach(
+    device: &AdbDevice,
     package: &str,
     port: u16,
     code_bin: &str,
@@ -223,14 +236,13 @@ fn attach(
 ) -> color_eyre::Result<()> {
     if relaunch {
         println!("Restarting {package}...");
-        let component = adb::resolve_launch_component(package)?;
-        adb_status(&["shell", "am", "start", "-S", "-n", &component])
-            .context("Failed to launch the app")?;
+        let component = device.resolve_launch_component(package)?;
+        device.start_activity(&component, true)?;
     } else {
         println!("Attaching to already-running {package}...");
     }
 
-    let pid = adb::wait_for_pid(package)?;
+    let pid = device.wait_for_pid(package)?;
     let info = lldb::build_attach_info(&pid, port, symbols)?;
     print_attach_info(port, &info);
     write_pid_file(pid_file, info.pid)?;

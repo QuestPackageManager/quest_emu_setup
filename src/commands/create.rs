@@ -2,11 +2,16 @@ use color_eyre::eyre::{Context, bail};
 
 use crate::{
     commands::{Command, GlobalContext},
-    constants::{self, adb_path, avd_path},
+    constants::{self, avd_path},
+    device::Backend,
 };
 
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 pub struct CreateArgs {
+    /// Device backend (auto-detected if omitted). Only the emulator has AVDs.
+    #[cfg_attr(feature = "clap", arg(long))]
+    backend: Option<Backend>,
+
     /// Create an AVD (Android Virtual Device)
     #[cfg_attr(feature = "clap", arg(long = "avd", default_value_t = false))]
     create_avd: bool,
@@ -34,9 +39,15 @@ pub struct CreateArgs {
 
 impl Command for CreateArgs {
     fn execute(self, ctx: &GlobalContext) -> color_eyre::Result<()> {
+        if Backend::resolve(self.backend) == Backend::Waydroid {
+            bail!(
+                "Waydroid has no AVDs, so there is nothing to create. \
+                 Use `setup --backend waydroid`, then `start --backend waydroid`"
+            );
+        }
+
         let android_emu_image_installed = constants::emulator_path().exists()
-            && adb_path()
-                .exists()
+            && constants::android_sdk_path().join("platform-tools").exists()
             && constants::android_sdk_path()
                 .join(self.system_image.replace(";", "/"))
                 .exists();

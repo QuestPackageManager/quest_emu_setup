@@ -15,7 +15,60 @@ Options:
   -h, --help  Print help
 ```
 
+## Device backends
+
+`quest_emu` can manage two kinds of device, picked with `--backend`:
+
+- `emulator`: the Android SDK emulator (AVDs). Uses `setup` → `create` → `start`.
+- `waydroid`: a [Waydroid](https://waydro.id) container, reached over TCP adb.
+  Uses `setup` → `start`, since it has no AVDs.
+
+If `--backend` is omitted, a running Waydroid session wins, then an installed
+Android Emulator, then an installed Waydroid.
+
+```shell
+quest_emu setup --backend waydroid   # waydroid init (sudo) + ARM translation check
+quest_emu start --backend waydroid   # container + session + UI, then adb connect
+quest_emu stop  --backend waydroid   # waydroid session stop
+```
+
+`setup --backend waydroid` needs the `waydroid` package already installed. It runs
+`waydroid init -s VANILLA` and then checks that ARM translation (libndk_translation
+or libhoudini) is configured. Quest apps are arm64-only and won't install without it.
+`quest_emu` doesn't install the translation layer itself. If it's missing, `setup`
+prints instructions, typically using
+[waydroid_script](https://github.com/casualsnek/waydroid_script).
+
+`start --backend waydroid` opens the Waydroid UI on purpose. While no UI is
+open, Waydroid freezes the container, and adb then reports the device as `offline`.
+
+### Picking the adb device
+
+`apk` and `debug` talk to exactly one adb device:
+
+1. `-s/--serial <serial>` (TCP serials like `192.168.240.112:5555` are
+   `adb connect`ed automatically)
+2. `$ANDROID_SERIAL`
+3. `--backend waydroid` / `--backend emulator`
+4. otherwise the only online device, or a running Waydroid session
+
+If several devices are connected and none was picked, the command errors instead of guessing.
+
+```shell
+quest_emu apk install ./apk/1.44.1_20239                   # folder with one .apk + its .obb files
+quest_emu apk install --backend waydroid ./beatsaber.apk
+```
+
+`apk install` reads the package name from the APK's manifest, so the file can
+have any name. It never deletes the input folder. `apk download --install --cleanup`
+deletes the downloaded version folder after a successful install.
+
 ## Debugging native code (lldb-dap)
+
+The app must be debuggable (`android:debuggable="true"`), since lldb-server
+is copied in with `run-as`. The lldb-server arch is taken from the installed
+app's ABI, not the device's. On an x86_64 device with ARM translation
+(Waydroid, x86_64 emulator images), an arm64 app resolves to arm64.
 
 ```shell
 quest_emu debug install <package> [arch]   # push + copy lldb-server into the app's private storage

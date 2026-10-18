@@ -6,13 +6,19 @@ use color_eyre::eyre::{Context, bail};
 use crate::{
     commands::Command,
     constants::{
-        self, ANDROID_SDK_TOOLS, adb_path, android_sdk_path, cmdline_tools_path, emulator_path,
+        self, ANDROID_SDK_TOOLS, android_sdk_path, cmdline_tools_path, emulator_path,
     },
+    device::Backend,
     downloader,
+    waydroid,
 };
 
 #[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct SetupArgs {
+    /// Device backend to set up (auto-detected if omitted)
+    #[cfg_attr(feature = "clap", arg(long))]
+    backend: Option<Backend>,
+
     /// Install the Android SDK tools
     /// This includes the SDK Manager, platform tools, and build tools
     /// By default, this is prompted if the tools are not found
@@ -30,10 +36,25 @@ pub struct SetupArgs {
     /// System image of AVD (Android Virtual Device)
     #[cfg_attr(feature = "clap", arg(long = "image", default_value_t = constants::default_avd_image()))]
     system_image: String,
+
+    /// Waydroid: system image type passed to `waydroid init -s`
+    #[cfg_attr(feature = "clap", arg(long, default_value = "VANILLA"))]
+    waydroid_system_type: String,
 }
 
 impl Command for SetupArgs {
     fn execute(self, ctx: &crate::commands::GlobalContext) -> color_eyre::Result<()> {
+        let backend = Backend::resolve(self.backend);
+        backend.remember();
+        match backend {
+            Backend::Waydroid => waydroid::setup(ctx, &self.waydroid_system_type),
+            Backend::Emulator => self.setup_emulator(ctx),
+        }
+    }
+}
+
+impl SetupArgs {
+    fn setup_emulator(self, ctx: &crate::commands::GlobalContext) -> color_eyre::Result<()> {
         let sdk_manager = constants::sdkmanager_path();
 
         println!("Using Android SDK path: {}", android_sdk_path().display());
@@ -52,7 +73,7 @@ impl Command for SetupArgs {
         }
 
         let android_emu_image_installed = constants::emulator_path().exists()
-            && adb_path().exists()
+            && constants::android_sdk_path().join("platform-tools").exists()
             && constants::android_sdk_path()
                 .join(self.system_image.replace(";", "/"))
                 .exists();
