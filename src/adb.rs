@@ -1,5 +1,6 @@
 use std::{
-    process::{Child, Command, Stdio},
+    io::Write,
+    process::{Child, Command, Output, Stdio},
     thread,
     time::Duration,
 };
@@ -124,16 +125,28 @@ impl AdbDevice {
             .with_context(|| format!("Failed to pull {remote} to {local}"))
     }
 
-    /// Runs `adb shell <args>`, inheriting stdio, and fails on a non-zero exit.
-    pub fn shell(&self, args: &[&str]) -> color_eyre::Result<()> {
-        let mut full = vec!["shell"];
-        full.extend_from_slice(args);
-        self.status(&full)
+    /// Runs `adb shell <args>`, echoes its output, and fails on a non-zero exit.
+    /// Returns the captured output for commands that report failure in it
+    /// while still exiting 0 (see `start_activity`).
+    pub fn shell(&self, args: &[&str]) -> color_eyre::Result<Output> {
+        let output = self
+            .command()
+            .arg("shell")
+            .args(args)
+            .output()
+            .with_context(|| format!("Failed to run `adb shell {}`", args.join(" ")))?;
+        std::io::stdout().write_all(&output.stdout)?;
+        std::io::stderr().write_all(&output.stderr)?;
+        if !output.status.success() {
+            bail!("`adb shell {}` exited with {}", args.join(" "), output.status);
+        }
+        Ok(output)
     }
 
     /// Runs `adb shell chmod <mode> <path>`.
     pub fn chmod(&self, mode: &str, path: &str) -> color_eyre::Result<()> {
         self.shell(&["chmod", mode, path])
+            .map(drop)
             .with_context(|| format!("Failed to chmod {path}"))
     }
 
@@ -143,6 +156,7 @@ impl AdbDevice {
         let mut full = vec!["run-as", package];
         full.extend_from_slice(args);
         self.shell(&full)
+            .map(drop)
             .with_context(|| format!("Failed to run `{}` as {package}", args.join(" ")))
     }
 
@@ -166,14 +180,36 @@ impl AdbDevice {
 
     /// Runs `adb shell am start -n <component>`, with `-S` to force-stop the
     /// app first when `force_stop` is set.
+    ///
+    /// `am start` prints failures to stderr and still exits 0 (`Error type 3` /
+    /// `Error: Activity class {...} does not exist`), so the output is checked
+    /// instead of the exit status.
     pub fn start_activity(&self, component: &str, force_stop: bool) -> color_eyre::Result<()> {
         let mut args = vec!["am", "start"];
         if force_stop {
             args.push("-S");
         }
         args.extend(["-n", component]);
-        self.shell(&args)
-            .with_context(|| format!("Failed to start {component}"))
+
+        let output = self
+            .shell(&args)
+            .with_context(|| format!("Failed to start {component}"))?;
+        if [output.stdout, output.stderr]
+            .iter()
+            .any(|out| String::from_utf8_lossy(out).contains("Error"))
+        {
+            bail!("Failed to start {component}");
+        }
+        Ok(())
+    }
+
+    /// Starts `package`'s launcher activity (see `resolve_launch_component`),
+    /// force-stopping it first when `force_stop` is set.
+    pub fn launch(&self, package: &str, force_stop: bool) -> color_eyre::Result<()> {
+        let component = self.resolve_launch_component(package).with_context(|| {
+            format!("Is {package} installed on {}?", self.describe())
+        })?;
+        self.start_activity(&component, force_stop)
     }
 
     /// Runs `adb shell <args>` and returns trimmed stdout, failing on a non-zero

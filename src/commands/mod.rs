@@ -1,6 +1,7 @@
 pub mod apk;
 #[cfg(feature = "avd")]
 pub mod create;
+pub mod launch;
 pub mod setup;
 pub mod start;
 pub mod stop;
@@ -23,6 +24,8 @@ pub enum MainCommand {
     Start(start::StartArgs),
     /// Stop the running emulator or Waydroid session
     Stop(stop::StopArgs),
+    /// Launch an installed app on the device
+    Launch(launch::LaunchArgs),
     /// Commands for patching APKs
     Apk(apk::ApkArgs),
     /// Setup the Android SDK and Emulator, or Waydroid with ARM translation
@@ -39,6 +42,7 @@ impl Command for MainCommand {
             MainCommand::Apk(args) => args.execute(ctx)?,
             MainCommand::Start(args) => args.execute(ctx)?,
             MainCommand::Stop(args) => args.execute(ctx)?,
+            MainCommand::Launch(args) => args.execute(ctx)?,
             MainCommand::Setup(setup_args) => setup_args.execute(ctx)?,
             MainCommand::Debug(debug_args) => debug_args.execute(ctx)?,
         }

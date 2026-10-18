@@ -17,13 +17,12 @@ use std::{
 
 use color_eyre::eyre::{Context, ContextCompat, bail};
 
-use crate::{
-    adb::{self, AdbDevice},
-};
+use crate::adb::{self, AdbDevice};
 
 const ADB_PORT: u16 = 5555;
 const WAYDROID_CFG: &str = "/var/lib/waydroid/waydroid.cfg";
 const WAYDROID_BASE_PROP: &str = "/var/lib/waydroid/waydroid_base.prop";
+const ACCEPT_ADB_PROMPT: &str = "Accept the \"Allow USB debugging?\" prompt in the Waydroid window";
 
 /// Parsed `waydroid status`.
 #[derive(Debug, Clone, Default)]
@@ -125,6 +124,9 @@ pub fn ensure_connected() -> color_eyre::Result<String> {
              Open the UI (`waydroid show-full-ui`) or run `quest_emu start waydroid`",
             state.unwrap_or("missing")
         ),
+        Some("unauthorized") => {
+            bail!("Waydroid device {serial} is unauthorized in adb. {ACCEPT_ADB_PROMPT}")
+        }
         state => bail!(
             "Waydroid device {serial} is {} in adb",
             state.unwrap_or("not listed")
@@ -138,7 +140,6 @@ fn device_state(serial: &str) -> color_eyre::Result<Option<String>> {
         .find(|d| d.serial == serial)
         .map(|d| d.state))
 }
-
 
 fn container_service_active() -> bool {
     Command::new("systemctl")
@@ -192,12 +193,19 @@ pub fn start(timeout: Duration) -> color_eyre::Result<String> {
     .context("Timed out waiting for the Waydroid session to start")?;
 
     println!("Connecting adb to {serial}...");
+    let mut hinted_unauthorized = false;
     poll_until(deadline, || {
-        if device_state(&serial)?.as_deref() != Some("device") {
-            // Fails until adbd is up; just retry.
-            let _ = adb::connect_tcp(&serial);
+        match device_state(&serial)?.as_deref() {
+            Some("device") => return Ok(Some(())),
+            Some("unauthorized") if !hinted_unauthorized => {
+                hinted_unauthorized = true;
+                println!("Note: adb reports {serial} as unauthorized. {ACCEPT_ADB_PROMPT}.");
+            }
+            _ => {}
         }
-        Ok((device_state(&serial)?.as_deref() == Some("device")).then_some(()))
+        // Fails until adbd is up; just retry.
+        let _ = adb::connect_tcp(&serial);
+        Ok(None)
     })
     .with_context(|| format!("Timed out waiting for adb to reach {serial}"))?;
 

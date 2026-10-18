@@ -236,8 +236,7 @@ fn attach(
 ) -> color_eyre::Result<()> {
     if relaunch {
         println!("Restarting {package}...");
-        let component = device.resolve_launch_component(package)?;
-        device.start_activity(&component, true)?;
+        device.launch(package, true)?;
     } else {
         println!("Attaching to already-running {package}...");
     }
