@@ -27,24 +27,33 @@ Each device backend is a feature. Both are on by default, and at least one is re
 The adb-based commands (`apk install`, `debug`) work with either backend, as
 does APK `download`/`patch`.
 
-## Device backends
+# AVD (Windows/Mac/Linux)
 
-`quest_emu` can manage two kinds of device. `setup` and `start` take the backend
-as a subcommand:
-
-- `avd`: the Android SDK emulator (AVDs). Uses `setup avd` → `create` → `start avd`.
-- `waydroid`: a [Waydroid](https://waydro.id) container, reached over TCP adb.
-  Uses `setup waydroid` → `start waydroid`, since it has no AVDs.
-
-`create` makes AVDs, so it is emulator-only. `stop`, `apk install` and `debug`
-take `--backend emulator|waydroid`. If it's omitted, they use whatever is running
-(Waydroid first, then an emulator), then the backend last used by `setup` or
-`start`, then whatever is installed.
+AVD is Google's emulatorm provided with their Android SDK. It has at times worked while others not. On Linux, I encountered various bugs and was rather frustrated with it. However, this is the most "official" emulator for Android you can use.
 
 ```shell
-quest_emu setup waydroid             # checks install, `waydroid init` and ARM translation
-quest_emu start waydroid             # container + session + UI, then adb connect
-quest_emu stop  --backend waydroid   # waydroid session stop
+quest_emu setup avd     # SDK cmdline-tools, then the emulator, platform-tools and system image
+quest_emu create        # create an AVD (default: android13desktop, 1920x1080, 60 fps)
+quest_emu start avd     # run it in the foreground until it exits
+```
+
+`setup avd` installs into `$ANDROID_SDK_ROOT` / `$ANDROID_HOME` (default
+`~/Android/Sdk`) and asks before each download (`--yes` skips the prompts). The
+default system image matches the host CPU: x86_64, or arm64-v8a on arm64 hosts.
+
+`create --overwrite` replaces an existing AVD of the same name. `start avd --fresh`
+boots without the saved snapshot, and anything after `--` is passed to the emulator.
+
+# Waydroid (Linux)
+
+A [Waydroid](https://waydro.id) container, reached over TCP adb, built with the
+`waydroid` feature. Waydroid has no AVDs, so there is no `create` step.
+
+Waydroid is interesting as it runs natively on Linux with little overhead (GPU accelerated on non-NVIDIA GPUs). ARM64 instruction translation is configured additionally.
+
+```shell
+quest_emu setup waydroid   # checks install, `waydroid init` and ARM translation
+quest_emu start waydroid   # container + session + UI, then adb connect
 ```
 
 `setup waydroid` checks that Waydroid is installed and initialized
@@ -59,7 +68,20 @@ container service isn't running.
 `start waydroid` opens the Waydroid UI on purpose. While no UI is
 open, Waydroid freezes the container, and adb then reports the device as `offline`.
 
-### Picking the adb device
+# Both backends
+
+## Picking the backend
+
+`stop`, `apk install` and `debug` take `--backend emulator|waydroid`. If it's
+omitted, they use whatever is running (Waydroid first, then an emulator), then
+the backend last used by `setup` or `start`, then whatever is installed.
+
+```shell
+quest_emu stop --backend waydroid   # waydroid session stop
+quest_emu stop --backend emulator   # adb emu kill
+```
+
+## Picking the adb device
 
 `apk` and `debug` talk to exactly one adb device:
 
@@ -70,6 +92,8 @@ open, Waydroid freezes the container, and adb then reports the device as `offlin
 4. otherwise the only online device, or a running Waydroid session
 
 If several devices are connected and none was picked, the command errors instead of guessing.
+
+## Installing APKs
 
 ```shell
 quest_emu apk install ./apk/1.44.1_20239                   # folder with one .apk + its .obb files
