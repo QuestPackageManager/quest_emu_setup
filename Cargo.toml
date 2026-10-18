@@ -45,11 +45,11 @@ mbf-res-man = { git = "https://github.com/Fernthedev/ModsBeforeFriday.git", pack
 
 clap = { version = "4", features = ["derive"], optional = true  }
 
-dirs = "6.0.0"
+dirs = "7.0.0"
 
 # Only used to extract the (plain Deflate) Android cmdline-tools zip; no need
 # for the other codecs or the write-side zopfli compressor.
-zip = { version = "8", default-features = false, optional = true, features = [
+zip = { version = "9", default-features = false, optional = true, features = [
     "deflate-flate2-zlib-rs",
 ] }
 
