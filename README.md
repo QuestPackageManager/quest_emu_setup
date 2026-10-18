@@ -2,6 +2,14 @@
 
 This project provides tools for setting up a Quest-like emulator and patching APK files to run within it.
 
+Based upon the guide written here: https://github.com/kodenamekrak/beat-saber-emulator-guide
+
+This CLI intends to streamline many of the nuisance steps in the guide. 
+
+This deliberately does not include any APKs related to Horizon services. See https://github.com/kodenamekrak/beat-saber-emulator-guide#installing-beat-saber
+
+> we first need to install Horizon, otherwise the game will immediately crash. You will need to install an older version of Horizon as recent ones will also crash. You can download it [here](https://www.mediafire.com/file/t6w909bnp4vfefd/Horizon.apk-signed-aligned.apk/file), otherwise you can extract the (unsigned) APK yourself from the system partition of old OS versions via https://cocaine.trade/Quest_2_firmware. The version I used is 51062580065800150
+
 ```shell
 Usage: quest_emu_setup [OPTIONS] <COMMAND>
 
