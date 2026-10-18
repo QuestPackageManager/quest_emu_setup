@@ -5,31 +5,41 @@
 use color_eyre::eyre::bail;
 use itertools::Itertools;
 
-use crate::{
-    adb::{self, AdbDevice},
-    constants, waydroid,
-};
+#[cfg(feature = "avd")]
+use crate::avd;
+use crate::adb::{self, AdbDevice};
+#[cfg(feature = "waydroid")]
+use crate::waydroid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Backend {
     /// The Android SDK emulator (AVDs)
+    #[cfg(feature = "avd")]
     Emulator,
     /// A Waydroid container, reached over TCP adb
+    #[cfg(feature = "waydroid")]
     Waydroid,
 }
 
 impl Backend {
     fn as_str(self) -> &'static str {
         match self {
+            #[cfg(feature = "avd")]
             Backend::Emulator => "emulator",
+            #[cfg(feature = "waydroid")]
             Backend::Waydroid => "waydroid",
         }
     }
 
     fn parse(s: &str) -> Option<Backend> {
-        [Backend::Emulator, Backend::Waydroid]
-            .into_iter()
+        [
+            #[cfg(feature = "avd")]
+            Backend::Emulator,
+            #[cfg(feature = "waydroid")]
+            Backend::Waydroid,
+        ]
+        .into_iter()
             .find(|b| b.as_str() == s.trim())
     }
 
@@ -45,31 +55,46 @@ impl Backend {
             return backend;
         }
 
-        let waydroid_status = waydroid::try_status();
-        let emulator_running = || {
-            adb::list_devices().is_ok_and(|devices| {
-                devices.iter().any(|d| d.serial.starts_with("emulator-"))
-            })
-        };
-
-        let backend = if waydroid_status.as_ref().is_some_and(|s| s.session_running) {
-            Backend::Waydroid
-        } else if emulator_running() {
-            Backend::Emulator
-        } else if let Some(last) = Backend::last_used() {
-            last
-        } else if constants::emulator_path().exists() {
-            Backend::Emulator
-        } else if waydroid_status.is_some() {
-            Backend::Waydroid
-        } else {
-            Backend::Emulator
-        };
+        let backend = Backend::detect();
+        #[cfg(all(feature = "avd", feature = "waydroid"))]
         println!(
             "Using {} backend (auto-detected, override with --backend)",
             backend.as_str()
         );
         backend
+    }
+
+    fn detect() -> Backend {
+        #[cfg(feature = "waydroid")]
+        let waydroid_status = waydroid::try_status();
+        #[cfg(feature = "waydroid")]
+        if waydroid_status.as_ref().is_some_and(|s| s.session_running) {
+            return Backend::Waydroid;
+        }
+
+        #[cfg(feature = "avd")]
+        if avd::is_running() {
+            return Backend::Emulator;
+        }
+
+        if let Some(last) = Backend::last_used() {
+            return last;
+        }
+        #[cfg(feature = "avd")]
+        if avd::is_emulator_installed() {
+            return Backend::Emulator;
+        }
+
+        #[cfg(feature = "waydroid")]
+        if waydroid_status.is_some() {
+            return Backend::Waydroid;
+        }
+
+        // The emulator is the default, as `setup` can install it from scratch.
+        #[cfg(feature = "avd")]
+        return Backend::Emulator;
+        #[cfg(not(feature = "avd"))]
+        Backend::Waydroid
     }
 
     fn state_file() -> Option<std::path::PathBuf> {
@@ -129,19 +154,22 @@ impl DeviceArgs {
         }
 
         let serial = match self.backend {
+            #[cfg(feature = "waydroid")]
             Some(Backend::Waydroid) => waydroid::ensure_connected()?,
+            #[cfg(feature = "avd")]
             Some(Backend::Emulator) => {
                 only_online(|d| d.serial.starts_with("emulator-"), "emulator", || {
-                    bail!("No emulator is running. Start one with `quest_emu start`")
+                    bail!("No emulator is running. Start one with `quest_emu start avd`")
                 })?
             }
             None => only_online(|_| true, "device", || {
+                #[cfg(feature = "waydroid")]
                 if waydroid::try_status().is_some_and(|s| s.session_running) {
                     return waydroid::ensure_connected();
                 }
                 bail!(
-                    "No adb device is connected. Start one with `quest_emu start` \
-                     (pass --backend to pick emulator or waydroid)"
+                    "No adb device is connected. Start one with `quest_emu start avd` \
+                     or `quest_emu start waydroid`"
                 )
             })?,
         };

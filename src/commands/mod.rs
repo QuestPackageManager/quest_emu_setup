@@ -1,4 +1,5 @@
 pub mod apk;
+#[cfg(feature = "avd")]
 pub mod create;
 pub mod setup;
 pub mod start;
@@ -15,7 +16,8 @@ pub trait Command {
 
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 pub enum MainCommand {
-    /// Create for Quest emulator. Downloads sdkmanager, emulator, system images, etc.
+    /// Create an AVD (Android Virtual Device) for the Android Emulator
+    #[cfg(feature = "avd")]
     Create(create::CreateArgs),
     /// Start the device: the Android Emulator with a specified AVD, or Waydroid
     Start(start::StartArgs),
@@ -32,6 +34,7 @@ pub enum MainCommand {
 impl Command for MainCommand {
     fn execute(self, ctx: &GlobalContext) -> color_eyre::Result<()> {
         match self {
+            #[cfg(feature = "avd")]
             MainCommand::Create(args) => args.execute(ctx)?,
             MainCommand::Apk(args) => args.execute(ctx)?,
             MainCommand::Start(args) => args.execute(ctx)?,

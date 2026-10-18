@@ -19,7 +19,6 @@ use color_eyre::eyre::{Context, ContextCompat, bail};
 
 use crate::{
     adb::{self, AdbDevice},
-    commands::GlobalContext,
 };
 
 const ADB_PORT: u16 = 5555;
@@ -109,7 +108,7 @@ pub fn try_status() -> Option<WaydroidStatus> {
 pub fn ensure_connected() -> color_eyre::Result<String> {
     let status = status()?;
     if !status.session_running {
-        bail!("The Waydroid session is not running. Start it with `quest_emu start --backend waydroid`");
+        bail!("The Waydroid session is not running. Start it with `quest_emu start waydroid`");
     }
     let serial = status
         .adb_serial()
@@ -123,7 +122,7 @@ pub fn ensure_connected() -> color_eyre::Result<String> {
         Some("device") => Ok(serial),
         state if status.is_frozen() => bail!(
             "Waydroid's container is FROZEN, so adb sees it as {}. \
-             Open the UI (`waydroid show-full-ui`) or run `quest_emu start --backend waydroid`",
+             Open the UI (`waydroid show-full-ui`) or run `quest_emu start waydroid`",
             state.unwrap_or("missing")
         ),
         state => bail!(
@@ -140,29 +139,6 @@ fn device_state(serial: &str) -> color_eyre::Result<Option<String>> {
         .map(|d| d.state))
 }
 
-/// Runs `cmd` through `sudo`, after confirming (unless `--yes`), since every
-/// host-side Waydroid management step needs root.
-fn sudo(ctx: &GlobalContext, args: &[&str], why: &str) -> color_eyre::Result<()> {
-    let display = format!("sudo {}", args.join(" "));
-    let accepted = ctx.yes
-        || dialoguer::Confirm::new()
-            .with_prompt(format!("{why}. Run `{display}`?"))
-            .default(true)
-            .interact()?;
-    if !accepted {
-        bail!("Aborted: `{display}` is required ({why})");
-    }
-
-    println!("{display}");
-    let status = Command::new("sudo")
-        .args(args)
-        .status()
-        .with_context(|| format!("Failed to run `{display}`"))?;
-    if !status.success() {
-        bail!("`{display}` exited with {status}");
-    }
-    Ok(())
-}
 
 fn container_service_active() -> bool {
     Command::new("systemctl")
@@ -180,20 +156,18 @@ fn container_service_active() -> bool {
 ///
 /// Idempotent: on an already-running instance this just re-opens the UI and
 /// connects adb.
-pub fn start(ctx: &GlobalContext, timeout: Duration) -> color_eyre::Result<String> {
+pub fn start(timeout: Duration) -> color_eyre::Result<String> {
     if !is_installed() {
-        bail!("Waydroid is not installed. Run `quest_emu setup --backend waydroid` first");
+        bail!("Waydroid is not installed. Run `quest_emu setup waydroid` first");
     }
     if !is_initialized() {
-        bail!("Waydroid has not been initialized. Run `quest_emu setup --backend waydroid` first");
+        bail!("Waydroid has not been initialized. Run `quest_emu setup waydroid` first");
     }
 
     if !container_service_active() {
-        sudo(
-            ctx,
-            &["systemctl", "start", "waydroid-container"],
-            "The waydroid-container service is not running",
-        )?;
+        bail!(
+            "Waydroid's container service is not running. Start it with `sudo systemctl start waydroid-container`"
+        );
     }
 
     println!("Opening the Waydroid UI...");
@@ -237,7 +211,7 @@ pub fn start(ctx: &GlobalContext, timeout: Duration) -> color_eyre::Result<Strin
     if !has_arm_translation() {
         eprintln!(
             "Warning: no ARM translation is configured, so arm64-only apps (e.g. Quest apps) \
-             won't install. Run `quest_emu setup --backend waydroid`."
+             won't install. Run `quest_emu setup waydroid`."
         );
     }
 
@@ -281,10 +255,10 @@ pub fn stop() -> color_eyre::Result<()> {
     Ok(())
 }
 
-/// Root-gated setup: downloads images (`waydroid init`), then checks that ARM
-/// translation is configured. Installing the Waydroid package itself and the
-/// translation layer are left to the user, with instructions printed for both.
-pub fn setup(ctx: &GlobalContext, system_type: &str) -> color_eyre::Result<()> {
+/// Checks that Waydroid is installed, initialized (`waydroid init`) and has ARM
+/// translation configured. Every fix needs root, so this never runs them:
+/// it stops with the command for the user to run instead.
+pub fn setup(system_type: &str) -> color_eyre::Result<()> {
     if !is_installed() {
         bail!(
             "Waydroid is not installed. Install it with your distro's package manager, e.g.:\n  \
@@ -295,15 +269,13 @@ pub fn setup(ctx: &GlobalContext, system_type: &str) -> color_eyre::Result<()> {
         );
     }
 
-    if is_initialized() {
-        println!("Waydroid is already initialized.");
-    } else {
-        sudo(
-            ctx,
-            &["waydroid", "init", "-s", system_type],
-            "Waydroid needs its Android images downloaded",
-        )?;
+    if !is_initialized() {
+        bail!(
+            "Waydroid has not been initialized. Download its Android images with \
+             `sudo waydroid init -s {system_type}`, then re-run this command."
+        );
     }
+    println!("Waydroid is initialized.");
 
     if !has_arm_translation() {
         bail!(
@@ -324,6 +296,6 @@ pub fn setup(ctx: &GlobalContext, system_type: &str) -> color_eyre::Result<()> {
     }
     println!("ARM translation is configured.");
 
-    println!("Waydroid is set up. Start it with `quest_emu start --backend waydroid`");
+    println!("Waydroid is set up. Start it with `quest_emu start waydroid`");
     Ok(())
 }

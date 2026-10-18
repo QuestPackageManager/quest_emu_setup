@@ -1,7 +1,7 @@
 //! APK file helpers: reading and patching `AndroidManifest.xml`, and re-signing.
 
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{Cursor, Read, Seek},
     path::Path,
 };
@@ -14,8 +14,8 @@ pub const MANIFEST_FILE: &str = "AndroidManifest.xml";
 const CERT_PEM: &[u8] = include_bytes!("debug_cert.pem");
 
 /// Opens `path` as an APK for reading.
-pub fn open(path: &Path) -> color_eyre::Result<ZipFile<File>> {
-    let file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+pub fn open(path: &Path) -> color_eyre::Result<ZipFile<std::fs::File>> {
+    let file = std::fs::File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
     ZipFile::open(file)
         .map_err(|a| eyre!(a))
         .with_context(|| format!("{} is not a valid APK (zip)", path.display()))

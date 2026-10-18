@@ -149,8 +149,6 @@ impl Command for ApkArgs {
                 let version_folder = output.join(&downloaded.main.version);
                 let apk_path = version_folder.join(format!("{}.apk", &downloaded.main.id));
 
-                let obb_files = files_with_extension(&version_folder, "obb")?;
-
                 println!(
                     "Downloaded {} version {}",
                     downloaded.main.id, matching_version
@@ -168,6 +166,7 @@ impl Command for ApkArgs {
                 }
 
                 if install {
+                    let obb_files = files_with_extension(&version_folder, "obb")?;
                     let device = self.device.resolve_adb()?;
                     do_install(&device, &apk_path, &obb_files)?;
                     if cleanup {

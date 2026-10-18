@@ -1,32 +1,5 @@
 use std::{env, path::PathBuf};
 
-#[cfg(target_os = "linux")]
-pub const ANDROID_SDK_TOOLS: &str =
-    "https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip";
-
-#[cfg(target_os = "macos")]
-pub const ANDROID_SDK_TOOLS: &str =
-    "https://dl.google.com/android/repository/commandlinetools-mac-13114758_latest.zip";
-
-#[cfg(target_os = "windows")]
-pub const ANDROID_SDK_TOOLS: &str =
-    "https://dl.google.com/android/repository/commandlinetools-win-13114758_latest.zip";
-
-pub const DEFAULT_AVD_NAME: &str = "android13desktop";
-
-/// Returns the default AVD system image, using an ABI that matches the host CPU.
-/// QEMU2 (the Android Emulator backend) requires the system image architecture to
-/// match the host architecture, so an aarch64 host (e.g. Apple Silicon, arm64 Linux)
-/// needs an arm64-v8a image rather than the x86_64 one used on x86_64 hosts.
-pub fn default_avd_image() -> String {
-    let abi = if cfg!(target_arch = "aarch64") {
-        "arm64-v8a"
-    } else {
-        "x86_64"
-    };
-    format!("system-images;android-33;android-desktop;{abi}")
-}
-
 /// Returns the path to the Android SDK
 /// Checks the ANDROID_SDK_ROOT and ANDROID_HOME environment variables
 /// If not set, defaults to {home}/Android/Sdk
@@ -58,66 +31,6 @@ pub fn android_ndk_path() -> PathBuf {
         .expect(
             "Could not find Android NDK path. Please set ANDROID_NDK_HOME environment variable.",
         )
-}
-
-/// Returns the path to the Android cmdline-tools latest directory
-/// {sdk}/cmdline-tools/latest
-pub fn cmdline_tools_path() -> PathBuf {
-    let mut path = android_sdk_path();
-    path.push("cmdline-tools");
-    path.push("latest");
-    path
-}
-
-/// Returns the path to the Android SDK Manager executable
-/// {sdk}/cmdline-tools/latest/bin/sdkmanager[.bat]
-pub fn sdkmanager_path() -> PathBuf {
-    let mut path = cmdline_tools_path();
-    path.push("bin");
-    path.push("sdkmanager");
-    if cfg!(target_os = "windows") {
-        path.set_extension("bat");
-    }
-    path
-}
-
-/// Returns the path to the Android AVD Manager executable
-/// {sdk}/cmdline-tools/latest/bin/avdmanager[.bat]
-pub fn avdmanager_path() -> PathBuf {
-    let mut path = cmdline_tools_path();
-    path.push("bin");
-    path.push("avdmanager");
-    if cfg!(target_os = "windows") {
-        path.set_extension("bat");
-    }
-    path
-}
-
-/// Returns the path to the Android AVDs
-/// {home}/.android/avd or $ANDROID_AVD_HOME
-pub fn avd_path() -> PathBuf {
-    std::env::var("ANDROID_AVD_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let home = dirs::home_dir()?;
-            Some(home.join(".android").join("avd"))
-        })
-        .expect(
-            "Could not find Android AVD path. Please set ANDROID_AVD_HOME environment variable.",
-        )
-}
-
-/// Returns the path to the Android Emulator executable
-/// {sdk}/emulator/emulator[.exe]
-pub fn emulator_path() -> PathBuf {
-    let mut path = android_sdk_path();
-    path.push("emulator");
-    path.push("emulator");
-    if cfg!(target_os = "windows") {
-        path.set_extension("exe");
-    }
-    path
 }
 
 /// Returns the adb executable to run: the SDK's ({sdk}/platform-tools/adb[.exe])

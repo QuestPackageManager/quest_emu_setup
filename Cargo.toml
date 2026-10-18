@@ -4,8 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["ureq", "clap"]
+default = ["ureq", "clap", "avd", "waydroid"]
 ureq = ["dep:ureq"]
+
+# Device backends; at least one is required.
+# Android SDK emulator: `setup` installs the SDK/emulator/system image, `create`
+# makes AVDs, `start`/`stop` run them.
+avd = ["dep:zip"]
+# Waydroid container, reached over TCP adb. Waydroid itself only runs on Linux.
+waydroid = []
 
 # Use reqwest for HTTP requests
 # MBF-Agent uses ureq, so this will bloat the binary a bit.
@@ -42,7 +49,7 @@ dirs = "6.0.0"
 
 # Only used to extract the (plain Deflate) Android cmdline-tools zip; no need
 # for the other codecs or the write-side zopfli compressor.
-zip = { version = "8", default-features = false, features = [
+zip = { version = "8", default-features = false, optional = true, features = [
     "deflate-flate2-zlib-rs",
 ] }
 

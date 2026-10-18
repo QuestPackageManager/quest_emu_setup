@@ -15,31 +15,48 @@ Options:
   -h, --help  Print help
 ```
 
+## Cargo features
+
+Each device backend is a feature. Both are on by default, and at least one is required:
+
+| Feature    | Default | Enables |
+|------------|---------|---------|
+| `avd`      | yes     | The Android SDK emulator backend (`--backend emulator`): SDK/emulator/system image `setup avd`, `create`, and running AVDs with `start avd`/`stop` |
+| `waydroid` | yes     | The Waydroid backend (`--backend waydroid`). Waydroid itself only runs on Linux |
+
+The adb-based commands (`apk install`, `debug`) work with either backend, as
+does APK `download`/`patch`.
+
 ## Device backends
 
-`quest_emu` can manage two kinds of device, picked with `--backend`:
+`quest_emu` can manage two kinds of device. `setup` and `start` take the backend
+as a subcommand:
 
-- `emulator`: the Android SDK emulator (AVDs). Uses `setup` → `create` → `start`.
+- `avd`: the Android SDK emulator (AVDs). Uses `setup avd` → `create` → `start avd`.
 - `waydroid`: a [Waydroid](https://waydro.id) container, reached over TCP adb.
-  Uses `setup` → `start`, since it has no AVDs.
+  Uses `setup waydroid` → `start waydroid`, since it has no AVDs.
 
-If `--backend` is omitted, a running Waydroid session wins, then an installed
-Android Emulator, then an installed Waydroid.
+`create` makes AVDs, so it is emulator-only. `stop`, `apk install` and `debug`
+take `--backend emulator|waydroid`. If it's omitted, they use whatever is running
+(Waydroid first, then an emulator), then the backend last used by `setup` or
+`start`, then whatever is installed.
 
 ```shell
-quest_emu setup --backend waydroid   # waydroid init (sudo) + ARM translation check
-quest_emu start --backend waydroid   # container + session + UI, then adb connect
+quest_emu setup waydroid             # checks install, `waydroid init` and ARM translation
+quest_emu start waydroid             # container + session + UI, then adb connect
 quest_emu stop  --backend waydroid   # waydroid session stop
 ```
 
-`setup --backend waydroid` needs the `waydroid` package already installed. It runs
-`waydroid init -s VANILLA` and then checks that ARM translation (libndk_translation
-or libhoudini) is configured. Quest apps are arm64-only and won't install without it.
-`quest_emu` doesn't install the translation layer itself. If it's missing, `setup`
-prints instructions, typically using
-[waydroid_script](https://github.com/casualsnek/waydroid_script).
+`setup waydroid` checks that Waydroid is installed and initialized
+(`sudo waydroid init -s VANILLA`), and that ARM translation (libndk_translation or
+libhoudini) is configured. Quest apps are arm64-only and won't install without it.
+`quest_emu` never runs anything as root. When a step is missing, it stops and
+prints the command to run, for ARM translation typically via
+[waydroid_script](https://github.com/casualsnek/waydroid_script). Likewise,
+`start waydroid` asks you to `sudo systemctl start waydroid-container` if the
+container service isn't running.
 
-`start --backend waydroid` opens the Waydroid UI on purpose. While no UI is
+`start waydroid` opens the Waydroid UI on purpose. While no UI is
 open, Waydroid freezes the container, and adb then reports the device as `offline`.
 
 ### Picking the adb device

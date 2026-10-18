@@ -2,13 +2,20 @@ use clap::Parser;
 
 use crate::commands::{Command, GlobalContext};
 
+#[cfg(not(any(feature = "avd", feature = "waydroid")))]
+compile_error!("quest_emu needs at least one device backend feature: `avd` or `waydroid`");
+
 mod commands;
 mod constants;
+#[cfg(feature = "avd")]
 mod downloader;
 mod lldb;
 mod adb;
 mod apk;
+#[cfg(feature = "avd")]
+mod avd;
 mod device;
+#[cfg(feature = "waydroid")]
 mod waydroid;
 
 #[derive(clap::Parser)]

@@ -1,7 +1,6 @@
 use crate::{
     commands::Command,
     device::{Backend, DeviceArgs},
-    waydroid,
 };
 
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
@@ -14,15 +13,16 @@ pub struct StopArgs {
 impl Command for StopArgs {
     fn execute(self, _ctx: &crate::commands::GlobalContext) -> color_eyre::Result<()> {
         match Backend::resolve(self.device.backend) {
-            Backend::Waydroid => waydroid::stop(),
+            #[cfg(feature = "waydroid")]
+            Backend::Waydroid => crate::waydroid::stop(),
+            #[cfg(feature = "avd")]
             Backend::Emulator => {
                 let device = DeviceArgs {
                     backend: Some(Backend::Emulator),
                     ..self.device
                 }
                 .resolve_adb()?;
-                println!("Stopping emulator {}...", device.describe());
-                device.status(&["emu", "kill"])
+                crate::avd::stop(&device)
             }
         }
     }
